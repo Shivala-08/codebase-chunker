@@ -6,9 +6,9 @@ AI tool that parses a Python codebase into a dependency graph, visualizes it, an
 
 - **Parser**: tree-sitter (`tree-sitter-python`) → nodes (modules/classes/functions/methods) + edges (`imports`, `imports_symbol`, `calls`, `contains`) → `graph.json`
 - **Graph store**: `networkx.DiGraph`, in-memory, rebuilt per run
-- **Backend**: FastAPI — `POST /parse`, `GET /graph`, `GET /node/{id}/explain`, `POST /chat`, `POST /agent/task`, `POST /docs/generate`, `GET /docs[/{page}]`
+- **Backend**: FastAPI — `POST /parse`, `GET /graph`, `GET /node/{id}/explain`, `POST /chat`, `POST /agent/task`, `POST /docs/generate`, `GET /docs[/{page}]`. Also serves the built frontend, so the whole app runs off one server.
 - **AI**: NVIDIA NIM (`https://integrate.api.nvidia.com/v1`, OpenAI-compatible). Small model for `/explain`, strong model for `/chat`, `/agent/task` and doc narratives — swap via env vars.
-- **Frontend**: React + Vite + `react-force-graph-2d`
+- **Frontend**: React + Vite + `react-force-graph-2d`. Built once with `npm run build` into `frontend/dist`; the backend serves it at `http://localhost:8000`.
 
 ## Setup
 
@@ -19,27 +19,28 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env        # paste your NVIDIA_API_KEY (get one at https://build.nvidia.com)
 
-# 2. Frontend (new terminal)
+# 2. Frontend
 cd frontend
 npm install
+npm run build     # produces frontend/dist, served by the backend
 ```
 
-## Run
+## Run (single server)
 
 ```bash
-# terminal 1 — backend
 cd backend && source .venv/bin/activate
 uvicorn main:app --reload --port 8000
-
-# terminal 2 — frontend
-cd frontend && npm run dev
 ```
 
-Open http://localhost:5173, type the **absolute path** of a Python repo (try `sample-repo/shop` from the project root — absolute path required by the parser), hit **Parse**, then:
+Open **http://localhost:8000** — that's it. The backend serves both the API and the built frontend; no Vite, no second terminal.
+
+The last parsed graph is persisted in `backend/data/graph.json` and auto-loads on page refresh, so you usually don't need to re-parse. Type the **absolute path** of a Python repo (try `sample-repo/shop` from the project root — absolute path required by the parser), hit **Parse**, then:
 
 - click any node → LLM explanation grounded in its code + neighbors
 - ask "how does login talk to the database?" → answer cites nodes, cited nodes highlight in the graph
 - type a task in the **Agent task** box → proposed diff on a new branch (see below)
+
+> **Frontend dev mode (optional):** `cd frontend && npm run dev` starts Vite with hot reload at http://localhost:5173 (it proxies `/api` to :8000, so the backend must be running). After editing frontend code without Vite, run `npm run build` and refresh :8000.
 
 ## Agent tasks (v1, Mode 3)
 
