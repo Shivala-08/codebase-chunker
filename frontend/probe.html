@@ -1,0 +1,10 @@
+<!doctype html><html><body id="out">pending</body>
+<script type="module">
+const t0 = performance.now()
+fetch('/api/graph')
+  .then(r => r.text())
+  .then(t => { document.body.textContent = 'SAMEORIGIN_OK bytes=' + t.length + ' ms=' + Math.round(performance.now() - t0) })
+  .catch(e => { document.body.textContent = 'SAMEORIGIN_FAIL ' + e })
+setTimeout(() => { if (document.body.textContent === 'pending') document.body.textContent = 'SAMEORIGIN_STALL ms=' + Math.round(performance.now() - t0) }, 8000)
+</script>
+</html>
