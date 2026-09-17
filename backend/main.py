@@ -13,6 +13,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import sys
@@ -95,7 +97,13 @@ def graph():
     # NOTE: return the file's text as the response body, NOT as a Python str
     # return value — FastAPI JSON-encodes str returns into a JSON *string*,
     # which double-encodes the payload and breaks frontend hydration.
-    return Response(content=GRAPH_PATH.read_text(encoding="utf-8"), media_type="application/json")
+    # no-store: caching this large payload makes Chrome's CORS-restart path
+    # deadlock on an incomplete cache entry and the body never resolves.
+    return Response(
+        content=GRAPH_PATH.read_text(encoding="utf-8"),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/meta")
@@ -237,3 +245,14 @@ def docs_page(page: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"unknown doc page: {page}")
     return Response(content=path.read_text(encoding="utf-8"), media_type="text/markdown; charset=utf-8")
+
+
+# --- serve the built frontend (frontend/dist) so the app runs off a single
+# server: http://localhost:8000 — no vite needed. `npm run build` refreshes it.
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+if (FRONTEND_DIST / "index.html").is_file():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    def index():
+        return FileResponse(FRONTEND_DIST / "index.html")

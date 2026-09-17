@@ -1,4 +1,6 @@
-const base = '/api'
+// Dev (vite :5173) goes through the /api proxy; served from the backend
+// itself (:8000) the routes live at the root, so no prefix.
+const base = location.port === '5173' ? '/api' : ''
 
 export async function parseRepo(repoPath) {
   const res = await fetch(`${base}/parse`, {
@@ -11,16 +13,14 @@ export async function parseRepo(repoPath) {
 }
 
 export async function fetchGraph() {
-  console.log('[CG api] fetchGraph: starting')
+  // 15s hard stop: a hung body must surface as an error, never a silent spin
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 15000)
   let res
   try {
-    res = await fetch(`${base}/graph`, { signal: ctrl.signal })
-    console.log('[CG api] fetchGraph: got headers', res.status)
-    const text = await res.text()
-    console.log('[CG api] fetchGraph: got body', text.length, 'bytes')
+    res = await fetch(`${base}/graph`, { signal: ctrl.signal, cache: 'no-store' })
     if (!res.ok) throw new Error('No graph available — parse a repo first.')
+    const text = await res.text()
     const parsed = JSON.parse(text)
     // tolerate a backend that double-encodes the graph as a JSON string
     return typeof parsed === 'string' ? JSON.parse(parsed) : parsed

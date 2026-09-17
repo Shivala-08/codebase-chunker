@@ -12,6 +12,16 @@ const TYPE_COLORS = {
   method: '#f0883e',
 }
 
+// single-flight the startup load so concurrent mounts can't double-fetch
+let initialGraphPromise = null
+const getInitialGraph = () => {
+  initialGraphPromise ||= fetchGraph().catch((e) => {
+    initialGraphPromise = null
+    throw e
+  })
+  return initialGraphPromise
+}
+
 export default function App() {
   const fgRef = useRef()
   const [graphData, setGraphData] = useState(null)
@@ -54,14 +64,12 @@ export default function App() {
 
   // Load existing graph on startup if the backend already has one
   useEffect(() => {
-    console.log('[CG] startup effect ran')
-    fetchGraph()
-      .then((g) => { console.log('[CG] fetchGraph resolved, nodes=', g.nodes.length); hydrate(g) })
+    getInitialGraph()
+      .then((g) => hydrate(g))
       .catch((e) => console.error('[CodeGraph] graph load failed:', e))
   }, [])
 
   const hydrate = (g) => {
-    console.log('[CG] hydrating')
     const nodes = g.nodes.map((n) => ({ ...n }))
     const links = g.edges.map((e, i) => ({ ...e, id: `e${i}`, source: e.from, target: e.to }))
     dgRef.current = g
