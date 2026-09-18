@@ -92,8 +92,14 @@ def _sym_id(rel_path: Path, name: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _walk_definitions(node, source: bytes, rel: Path, module_qualname: str,
-                      nodes: list[dict], contains: list[tuple[str, str, str]]):
-    """Recursively extract classes/functions, tracking dotted qualnames."""
+                      nodes: list[dict], contains: list[tuple[str, str, str]],
+                      parent_is_class: bool = False):
+    """Recursively extract classes/functions, tracking dotted qualnames.
+
+    A def is a method iff its immediate parent is a class (a def nested in
+    another def is a plain nested function); every symbol gets a `contains`
+    edge from its module, top-level classes included.
+    """
     for child in node.children:
         kind = child.type
         if kind == "class_definition":
@@ -109,13 +115,12 @@ def _walk_definitions(node, source: bytes, rel: Path, module_qualname: str,
                 "line_end": child.end_point[0] + 1,
                 "docstring": _docstring(child, source),
             })
-            if module_qualname:
-                contains.append((_module_id(rel), _sym_id(rel, qualname), "contains"))
-            _walk_definitions(child, source, rel, qualname, nodes, contains)
+            contains.append((_module_id(rel), _sym_id(rel, qualname), "contains"))
+            _walk_definitions(child, source, rel, qualname, nodes, contains, parent_is_class=True)
         elif kind == "function_definition":
             name = _node_text(child.child_by_field_name("name"), source)
             qualname = f"{module_qualname}.{name}" if module_qualname else name
-            is_method = module_qualname != "" and "." in module_qualname
+            is_method = parent_is_class
             nodes.append({
                 "id": _sym_id(rel, qualname),
                 "type": "method" if is_method else "function",
@@ -127,10 +132,10 @@ def _walk_definitions(node, source: bytes, rel: Path, module_qualname: str,
                 "docstring": _docstring(child, source),
             })
             contains.append((_module_id(rel), _sym_id(rel, qualname), "contains"))
-            _walk_definitions(child, source, rel, qualname, nodes, contains)
+            _walk_definitions(child, source, rel, qualname, nodes, contains, parent_is_class=False)
         # descend into anything else that can nest definitions
         elif kind not in ("string", "comment"):
-            _walk_definitions(child, source, rel, module_qualname, nodes, contains)
+            _walk_definitions(child, source, rel, module_qualname, nodes, contains, parent_is_class)
 
 
 def _module_name(rel: Path) -> str:

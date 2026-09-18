@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.codegraph.app</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/pallav/Downloads/Codebase-chunker/backend/.venv/bin/python</string>
+    <string>-m</string>
+    <string>uvicorn</string>
+    <string>main:app</string>
+    <string>--port</string>
+    <string>8000</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/pallav/Downloads/Codebase-chunker/backend</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- restart automatically if the server ever crashes -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/pallav/Downloads/Codebase-chunker/backend/server.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/pallav/Downloads/Codebase-chunker/backend/server.log</string>
+</dict>
+</plist>

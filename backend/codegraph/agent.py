@@ -408,7 +408,9 @@ def _reanchor_hunks(diff_text: str, base: Path) -> str:
             # mis-indent whole hunks), additions come from the model,
             # re-indented to the line they replace
             rebuilt: list[str] = []
-            del_indents: list[str] = []
+            del_indents: list[str] = []       # indents of pending '-' lines, consumed positionally
+            last_deleted_indent = ""          # fallback once the '-' run is exhausted
+            group_has_deletion = False
             k = pos
             for l in body:
                 tag, content = l[0], l[1:]
@@ -416,12 +418,26 @@ def _reanchor_hunks(diff_text: str, base: Path) -> str:
                     rebuilt.append(l)
                     continue
                 if tag == "+":
-                    ind = ""
-                    if k < len(file_lines):
+                    if del_indents:
+                        # i-th added line after a deletion takes the i-th
+                        # deleted line's indentation
+                        ind = del_indents.pop(0)
+                    elif k < len(file_lines):
+                        # replacement grew the line count (-1 +2 etc.): extra
+                        # additions sit before the next real line, so match
+                        # that line's indentation
                         fl = file_lines[k]
                         ind = fl[:len(fl) - len(fl.lstrip())] if fl.strip() else ""
-                    if del_indents:
-                        ind = del_indents.pop(0)
+                    elif group_has_deletion:
+                        # past EOF right after a deletion: share the last
+                        # deleted line's indent (e.g. -return +docstring +return
+                        # at the end of a function body)
+                        ind = last_deleted_indent
+                    else:
+                        # past EOF with nothing to consult — keep the model's
+                        # own indentation instead of collapsing the line to
+                        # column 0 (which breaks Python)
+                        ind = content[:len(content) - len(content.lstrip())] if content.strip() else ""
                     rebuilt.append("+" + ind + content.lstrip())
                     continue
                 if k >= len(file_lines):
@@ -430,9 +446,13 @@ def _reanchor_hunks(diff_text: str, base: Path) -> str:
                 ind = fl[:len(fl) - len(fl.lstrip())] if fl.strip() else ""
                 if tag == " ":
                     rebuilt.append(" " + fl)
+                    del_indents = []              # a context line ends the -/+ group
+                    group_has_deletion = False
                 else:  # '-'
                     rebuilt.append("-" + fl)
                     del_indents.append(ind)
+                    last_deleted_indent = ind
+                    group_has_deletion = True
                 k += 1
             pending.append((pos, rebuilt, file_lines))
             i = j
