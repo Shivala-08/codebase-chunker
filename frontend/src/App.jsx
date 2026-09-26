@@ -3,7 +3,8 @@ import ForceGraph2D from 'react-force-graph-2d'
 import Minimap from './Minimap.jsx'
 import AgentPanel from './AgentPanel.jsx'
 import DocsPanel from './DocsPanel.jsx'
-import { parseRepo, fetchGraph, explainNode, askQuestion } from './api.js'
+import InsightsPanel from './InsightsPanel.jsx'
+import { parseRepo, fetchGraph, explainNode, askQuestion, fetchHotspots } from './api.js'
 
 const TYPE_COLORS = {
   module: '#58a6ff',
@@ -36,6 +37,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [focusId, setFocusId] = useState(null)
   const [chat, setChat] = useState({ messages: [], input: '', pending: false })
+  const [hotspotDegrees, setHotspotDegrees] = useState(() => new Map())
   const dgRef = useRef(null)
   const fittedRef = useRef(false)
 
@@ -69,6 +71,14 @@ export default function App() {
       .catch((e) => console.error('[CodeGraph] graph load failed:', e))
   }, [])
 
+  // v4: load hotspots so risky nodes render larger; refetch after each parse
+  useEffect(() => {
+    if (!meta?.repo) return
+    fetchHotspots(20)
+      .then((res) => setHotspotDegrees(new Map(res.hotspots.map((h) => [h.id, h.degree]))))
+      .catch(() => setHotspotDegrees(new Map()))
+  }, [meta?.repo])
+
   const hydrate = (g) => {
     const nodes = g.nodes.map((n) => ({ ...n }))
     const links = g.edges.map((e, i) => ({ ...e, id: `e${i}`, source: e.from, target: e.to }))
@@ -87,6 +97,9 @@ export default function App() {
       hydrate(g)
       const res = await fetch('/api/meta').then((r) => r.json())
       setMeta(res)
+      fetchHotspots(20)
+        .then((hs) => setHotspotDegrees(new Map(hs.hotspots.map((h) => [h.id, h.degree]))))
+        .catch(() => setHotspotDegrees(new Map()))
       setSelected(null)
       setExplanation(null)
       setChat({ messages: [], input: '', pending: false })
@@ -146,7 +159,7 @@ export default function App() {
       const firstId = [...cited][0]
       const fn = graphData?.nodes.find((x) => x.id === firstId)
       if (fn) setTimeout(() => focusNode(fn), 100)
-      setChat((c) => ({ ...c, messages: [...c.messages, { role: 'assistant', text: res.answer, cited: [...cited] }] }))
+      setChat((c) => ({ ...c, messages: [...c.messages, { role: 'assistant', text: res.answer, cited: [...cited], provider: res.provider }] }))
     } catch (e) {
       setChat((c) => ({ ...c, messages: [...c.messages, { role: 'assistant', text: `⚠️ ${e.message}` }] }))
     } finally {
@@ -161,6 +174,7 @@ export default function App() {
   }
 
   const paintNode = useCallback((node, ctx, globalScale) => {
+    const r = 4
     const q = query.trim().toLowerCase()
     const searching = q.length > 0
     const cited = highlight.has(node.id)
@@ -176,9 +190,12 @@ export default function App() {
     const fontSize = 12 / globalScale
     ctx.font = `${cited ? 'bold ' : ''}${fontSize}px sans-serif`
     ctx.globalAlpha = dimmed ? 0.12 : 1
+    // hotspot nodes (high fan-in/out, v4) render larger — risk is visible at a glance
+    const deg = hotspotDegrees.get(node.id) || 0
+    const hotspotR = r + Math.min(Math.sqrt(deg) * 1.2, 8)
     ctx.fillStyle = nodeColor(node, isMatch, cited)
     ctx.beginPath()
-    ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
+    ctx.arc(node.x, node.y, hotspotR, 0, 2 * Math.PI)
     ctx.fill()
     if (cited || isMatch) {
       ctx.strokeStyle = cited ? '#ffffff' : '#d29922'
@@ -188,12 +205,10 @@ export default function App() {
     if (showLabel) {
       ctx.fillStyle = 'rgba(230,237,243,0.9)'
       ctx.textAlign = 'center'
-      ctx.fillText(label, node.x, node.y + r + fontSize + 1)
+      ctx.fillText(label, node.x, node.y + hotspotR + fontSize + 1)
     }
     ctx.globalAlpha = 1
-  }, [highlight, query])
-
-  const r = 4
+  }, [highlight, query, hotspotDegrees])
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -235,6 +250,14 @@ export default function App() {
 
         <DocsPanel />
 
+        <InsightsPanel
+          onFocusNode={(id) => {
+            const n = graphData?.nodes.find((x) => x.id === id)
+            if (n) { handleNodeClick(n); focusNode(n) }
+          }}
+          onHighlight={handleHighlight}
+        />
+
         <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {chat.messages.length === 0 && (
             <div style={{ color: '#6e7681', fontSize: 13, lineHeight: 1.5 }}>
@@ -254,6 +277,9 @@ export default function App() {
               lineHeight: 1.45,
             }}>
               {m.text}
+              {m.role === 'assistant' && m.provider && (
+                <div style={{ marginTop: 4, fontSize: 9, color: '#6e7681' }}>via {m.provider}</div>
+              )}
               {m.cited?.length > 0 && (
                 <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                   {m.cited.map((c) => (

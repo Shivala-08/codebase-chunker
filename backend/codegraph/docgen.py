@@ -154,9 +154,9 @@ RELATIONSHIPS (internal):
 {relationships if relationships else "(none)"}
 
 Write the narrative now."""
-    # a narrative is a few sentences; the cap keeps NIM latency bounded
+    # a narrative is a few sentences; the cap keeps latency bounded
     try:
-        return nim.complete_raw(system=system, user=user, model=nim.MODEL_CHAT)
+        return nim.complete_raw(system=system, user=user, tier="chat")
     except (RuntimeError, Exception) as e:
         # NIM unreachable / truncation / rate limit -> docstring-derived fallback,
         # so a flaky LLM can never block doc generation

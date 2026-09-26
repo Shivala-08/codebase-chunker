@@ -661,7 +661,7 @@ def run_task(repo_path: str, task: str, store, max_nodes: int = 12) -> AgentResu
     system, user = _build_task_prompt(task, "\n".join(blocks), relationships)
 
     # 2. generation (strong model — diff planning benefits from reasoning, TRD §8)
-    raw = nim.complete_raw(system=system, user=user, model=nim.MODEL_CHAT)
+    raw = nim.complete_raw(system=system, user=user, tier="chat")
     if os.environ.get("CODEGRAPH_DEBUG"):
         with open("/tmp/codegraph-agent-raw.txt", "w") as f:
             f.write(raw)  # diagnostic: inspect what the model actually returned

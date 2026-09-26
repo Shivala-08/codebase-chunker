@@ -1,0 +1,36 @@
+# CodeGraph provider chain (v4 TRD §3.1) — order = failover priority.
+# Each provider is OpenAI-compatible; keys come from the env var named in
+# api_key_env. A provider with no key set is skipped silently, so you can
+# leave this file as-is and run with just NVIDIA_API_KEY.
+providers:
+  - name: nim
+    base_url: https://integrate.api.nvidia.com/v1
+    api_key_env: NVIDIA_API_KEY
+    models:
+      explain: nvidia/nemotron-3.5-lightning-30b-a3b
+      chat: nvidia/nemotron-3-super-120b-a12b
+    rpm_limit: 20        # NIM allows ~40/account; stay at half like v0
+
+  - name: openrouter
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    models:
+      explain: qwen/qwen3-coder:free
+      chat: nvidia/nemotron-nemotron-3-ultra:free
+    rpm_limit: 20        # free tier; 50 req/day (1,000 after a one-time $10 top-up)
+
+  - name: gemini
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    models:
+      explain: gemini-2.0-flash-lite
+      chat: gemini-2.0-flash
+    rpm_limit: 15        # verify in Google AI Studio — Google shifts these often
+
+  - name: groq
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    models:
+      explain: llama-3.1-8b-instant
+      chat: llama-3.3-70b-versatile
+    rpm_limit: 30

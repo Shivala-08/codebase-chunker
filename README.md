@@ -1,14 +1,76 @@
 # CodeGraph
 
-AI tool that parses a Python codebase into a dependency graph, visualizes it, and answers questions grounded in that graph — instead of raw-text RAG or blind grepping.
+AI tool that parses a codebase into a dependency graph, visualizes it, and answers questions grounded in that graph — instead of raw-text RAG or blind grepping.
 
 ## Stack
 
-- **Parser**: tree-sitter (`tree-sitter-python`) → nodes (modules/classes/functions/methods) + edges (`imports`, `imports_symbol`, `calls`, `contains`) → `graph.json`
+- **Parser**: tree-sitter with a language registry (`backend/codegraph/parser.py`) → nodes (modules/classes/functions/methods) + edges (`imports`, `imports_symbol`, `calls`, `contains`) → `graph.json`. One repo = one graph, even with mixed languages (v4).
 - **Graph store**: `networkx.DiGraph`, in-memory, rebuilt per run
-- **Backend**: FastAPI — `POST /parse`, `GET /graph`, `GET /node/{id}/explain`, `POST /chat`, `POST /agent/task`, `POST /docs/generate`, `GET /docs[/{page}]`. Also serves the built frontend, so the whole app runs off one server.
-- **AI**: NVIDIA NIM (`https://integrate.api.nvidia.com/v1`, OpenAI-compatible). Small model for `/explain`, strong model for `/chat`, `/agent/task` and doc narratives — swap via env vars.
+- **Backend**: FastAPI — `POST /parse`, `GET /graph`, `GET /node/{id}/explain`, `POST /chat`, `POST /agent/task`, `POST /docs/generate`, `GET /docs[/{page}]`, plus the v4 endpoints below. Also serves the built frontend, so the whole app runs off one server.
+- **AI**: provider chain (v4) — NVIDIA NIM primary, OpenRouter/Gemini/Groq as automatic failover (`backend/codegraph/providers.yaml`), with per-provider rate limiting and circuit breakers. Only the keys you set are used.
 - **Frontend**: React + Vite + `react-force-graph-2d`. Built once with `npm run build` into `frontend/dist`; the backend serves it at `http://localhost:8000`.
+
+## Languages (v4)
+
+| Language | Extensions | Notes |
+|---|---|---|
+| Python | `.py` | full symbol + import + call resolution |
+| JS/TS | `.js .jsx .mjs .cjs .ts .tsx` | functions/classes/methods, import/require edges |
+| Java | `.java` | classes/interfaces/methods/ctors, import + call edges |
+| Go | `.go` | functions + receiver methods, struct/interface types |
+| C# | `.cs` | classes/structs/interfaces/methods (P1) |
+| C / C++ | `.c .h .cpp .cc .cxx .hpp .hh` | functions, structs/classes, `#include` edges (best-effort) |
+| Rust | `.rs` | functions, structs/enums/traits, `use` edges (best-effort) |
+
+Unknown extensions are skipped, not errored. Adding a language = one registry entry + one ~80-line extractor in `parser.py` — no parser rewrite (PRD v4 story #2). Cross-language call edges (JS calling a Python endpoint) are **not** resolved automatically; both languages still land in the same graph. A grammar whose wheel didn't install is skipped per-file; you can also force-disable grammars with `CODEGRAPH_DISABLED_LANGUAGES="c-sharp,rust"`.
+
+## Provider fallback (v4)
+
+`/explain`, `/chat`, agent tasks and doc narratives all go through the chain in `backend/codegraph/providers.yaml`: NIM → OpenRouter → Gemini → Groq, tried in order.
+
+- **429 from one provider trips its circuit for 60s** and the next provider is tried immediately in the same request — no global backoff, no stalled sessions (PRD story #3)
+- each provider keeps its **own** RPM budget (`rpm_limit` in the yaml)
+- the response includes `"provider": "<name>"` (and `via <name>` in the chat UI) so you can see who actually served it (story #4)
+- reorder or disable providers by editing the yaml — no code changes (story #5); a provider with no key in `.env` is skipped silently
+
+## Insights: blast radius + hotspots (v4)
+
+Pure graph math — no LLM, instant:
+
+```bash
+curl 'localhost:8000/node/db.py::save_order/blast-radius?hops=3'   # what breaks if I change this?
+curl 'localhost:8000/graph/hotspots?limit=15'                      # most-connected, riskiest nodes
+```
+
+Blast radius walks incoming edges transitively (per-hop rings: direct callers first). Hotspots rank non-module nodes by fan-in + fan-out. Both are in the 📐 **Insights** panel; hotspot nodes also render larger in the graph.
+
+## Auto re-parse on save (v4)
+
+After any `/parse`, a `watchdog` file watcher follows the parsed repo. Saving a file with a known extension triggers a debounced full re-parse (~1.5s) — no manual re-parse, no restart. `POST /watch/stop` / `POST /watch/start` control it; `/meta` shows its state.
+
+## Export + snapshot diff (v4)
+
+```bash
+curl 'localhost:8000/graph/export?format=graphml' -o graph.graphml   # or dot, or json
+
+curl -X POST localhost:8000/graph/diff -H 'Content-Type: application/json' \
+  -d '{"graph_a": "old/graph.json", "graph_b": "new/graph.json"}'   # added/removed/changed
+```
+
+Export feeds Gephi/yEd/any DOT viewer. The diff is a pure set comparison over two `graph.json` snapshots — pair it with two commits to see what a PR structurally touched. Download buttons live in Insights → ⚙️ Status.
+
+## CLI (no server, v4)
+
+```bash
+cd backend
+.venv/bin/python -m codegraph.cli parse ../sample-repo/shop
+.venv/bin/python -m codegraph.cli chat "how does login verify a password?" --show-provider
+.venv/bin/python -m codegraph.cli blast-radius db.py::save_order --hops 2
+.venv/bin/python -m codegraph.cli hotspots --limit 10
+.venv/bin/python -m codegraph.cli export --format dot
+```
+
+`chat`/`explain` use the same provider chain; `blast-radius`/`hotspots`/`export` need no API key at all.
 
 ## Setup
 
@@ -76,19 +138,21 @@ curl localhost:8000/docs/cluster.md
 
 > FastAPI's built-in Swagger console lives at `/api-docs` (moved off `/docs`).
 
-## CLI (no server)
+## Parser CLI (quick dump)
 
 ```bash
 cd backend
 python -m codegraph.parser ../sample-repo/shop out.json
 ```
 
-## Known limitations (v0/v1, by design)
+## Known limitations (by design)
 
 - Static call resolution is best-effort (~80%): dynamic dispatch, `getattr`, decorators missed
 - Keyword-match retrieval (no embeddings yet)
 - Graph rebuilt per run; no persistence
-- Python only for now (JS/TS next)
+- Cross-language call edges (JS calling a Python endpoint) are not resolved — both graphs coexist but stay separate
+- C/C++ and Rust extractors are deliberately best-effort; header/module resolution is a real problem left unsolved for v4
+- File-watch re-parse is whole-repo, debounced — not incremental per-file patching (the TRD's sanctioned first pass)
 - Agent diffs must apply cleanly against HEAD; ambiguous tasks fall back to `NEEDS_CONTEXT` rather than guessing
 - Hunk line numbers from the model are re-anchored against file reality before apply; unmatchable hunks are rejected
 - Docs cluster by directory — repos with a single directory get one page; narratives depend on docstring quality

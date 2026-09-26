@@ -72,3 +72,46 @@ export async function fetchDocPage(name) {
   if (!res.ok) throw new Error((await res.json()).detail || 'doc page failed')
   return res.text()
 }
+
+// --- v4 ---
+
+export async function fetchBlastRadius(nodeId, hops = 3) {
+  const res = await fetch(`${base}/node/${encodeURIComponent(nodeId)}/blast-radius?hops=${hops}`)
+  if (!res.ok) throw new Error((await res.json()).detail || 'blast radius failed')
+  return res.json()
+}
+
+export async function fetchHotspots(limit = 15) {
+  const res = await fetch(`${base}/graph/hotspots?limit=${limit}`)
+  if (!res.ok) throw new Error((await res.json()).detail || 'hotspots failed')
+  return res.json()
+}
+
+export async function fetchMeta() {
+  const res = await fetch(`${base}/meta`)
+  if (!res.ok) throw new Error('meta failed')
+  return res.json()
+}
+
+export async function exportGraph(format) {
+  const res = await fetch(`${base}/graph/export?format=${encodeURIComponent(format)}`)
+  if (!res.ok) throw new Error((await res.json()).detail || 'export failed')
+  return res.text()
+}
+
+export function downloadGraphExport(format, text) {
+  const ext = format === 'json' ? 'json' : format === 'graphml' ? 'graphml' : 'dot'
+  const blob = new Blob([text], { type: format === 'json' ? 'application/json' : 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `codegraph-export.${ext}`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function watchControl(action) {
+  const res = await fetch(`${base}/watch/${action}`, { method: 'POST' })
+  if (!res.ok) throw new Error((await res.json()).detail || 'watch control failed')
+  return res.json()
+}
